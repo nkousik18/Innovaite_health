@@ -1,0 +1,42 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'ai.supplychain'
+version = '0.1.0'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // JUnit 5 - split API and engine so the engine is available at test runtime
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.10.0'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.10.0'
+}
+
+application {
+    mainClass = 'ai.supplychain.RunSupplyChain'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+jar {
+    archiveBaseName.set('supplychain-ai')
+    archiveVersion.set('0.1.0')
+    manifest {
+        attributes 'Main-Class': 'ai.supplychain.RunSupplyChain'
+    }
+    from(sourceSets.main.output)
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events "passed", "skipped", "failed"
+    }
+}
