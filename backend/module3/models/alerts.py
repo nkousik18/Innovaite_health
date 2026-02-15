@@ -1,0 +1,237 @@
+"""
+Shortage alerting and notification models.
+"""
+
+from datetime import datetime
+from typing import Optional
+
+from sqlalchemy import (
+    Column, String, Float, Integer, DateTime, Text, Boolean,
+    ForeignKey, Enum as SQLEnum, JSON, Index
+)
+from sqlalchemy.orm import relationship
+import enum
+
+from .base import Base
+
+
+class AlertLevel(enum.Enum):
+    """Alert severity levels."""
+    NORMAL = "normal"
+    WARNING = "warning"       # Yellow - Pre-Shortage (30 days)
+    IMMINENT = "imminent"     # Orange - Shortage Imminent (15 days)
+    CRITICAL = "critical"     # Red - Critical Shortage (7 days)
+
+
+class AlertType(enum.Enum):
+    """Types of food security alerts."""
+    SHORTAGE = "shortage"
+    PRODUCTION = "production"
+    DISTRIBUTION = "distribution"
+    PRICE = "price"
+    QUALITY = "quality"
+    IMPORT = "import"
+    WEATHER = "weather"
+
+
+class AlertStatus(enum.Enum):
+    """Alert status tracking."""
+    ACTIVE = "active"
+    ACKNOWLEDGED = "acknowledged"
+    RESPONDING = "responding"
+    RESOLVED = "resolved"
+    ESCALATED = "escalated"
+    FALSE_ALARM = "false_alarm"
+
+
+class ShortageAlert(Base):
+    """Food shortage alerts and predictions."""
+
+    __tablename__ = "shortage_alerts"
+
+    # Location
+    region_id = Column(Integer, ForeignKey("regions.id"), nullable=False)
+    category_id = Column(Integer, ForeignKey("food_categories.id"))
+
+    # Alert details
+    alert_code = Column(String(50), unique=True, nullable=False)
+    alert_type = Column(SQLEnum(AlertType), nullable=False)
+    alert_level = Column(SQLEnum(AlertLevel), nullable=False)
+    status = Column(SQLEnum(AlertStatus), default=AlertStatus.ACTIVE)
+
+    title = Column(String(255), nullable=False)
+    description = Column(Text)
+    food_items_affected = Column(JSON)  # List of specific foods
+
+    # Timing
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    predicted_shortage_date = Column(DateTime)
+    days_until_shortage = Column(Integer)
+    resolved_at = Column(DateTime)
+
+    # Inventory context
+    current_inventory_tonnes = Column(Float)
+    current_days_supply = Column(Float)
+    consumption_rate_tonnes_day = Column(Float)
+    minimum_required_tonnes = Column(Float)
+
+    # Production impact
+    production_impact_pct = Column(Float)
+    harvest_forecast_tonnes = Column(Float)
+    expected_production_loss = Column(Float)
+
+    # Distribution impact
+    distribution_disrupted = Column(Boolean, default=False)
+    routes_affected = Column(JSON)
+    capacity_reduction_pct = Column(Float)
+
+    # Population impact
+    population_affected = Column(Integer)
+    vulnerable_population_affected = Column(Integer)
+    estimated_caloric_deficit = Column(Float)
+
+    # Confidence
+    confidence_score = Column(Float)  # 0-1
+    model_name = Column(String(100))
+    prediction_factors = Column(JSON)
+
+    # Response
+    recommended_actions = Column(JSON)
+    response_status = Column(String(100))
+    response_lead = Column(String(100))
+
+    # Escalation
+    escalation_level = Column(Integer, default=0)
+    escalated_to = Column(JSON)  # List of escalation contacts
+
+    is_active = Column(Boolean, default=True)
+
+    # Relationships
+    region = relationship("Region", back_populates="alerts")
+    category = relationship("FoodCategory")
+    history = relationship("AlertHistory", back_populates="alert")
+    # TEMPORARILY DISABLED:     subscriptions = relationship("AlertSubscription", viewonly=True)
+
+    __table_args__ = (
+        Index("idx_alert_region_level", "region_id", "alert_level"),
+        Index("idx_alert_status", "status", "is_active"),
+        Index("idx_alert_type_date", "alert_type", "created_at"),
+    )
+
+
+class AlertHistory(Base):
+    """Historical tracking of alert status changes."""
+
+    __tablename__ = "alert_history"
+
+    alert_id = Column(Integer, ForeignKey("shortage_alerts.id"), nullable=False)
+
+    # Change details
+    changed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    changed_by = Column(String(100))
+
+    # Previous and new values
+    previous_level = Column(SQLEnum(AlertLevel))
+    new_level = Column(SQLEnum(AlertLevel))
+    previous_status = Column(SQLEnum(AlertStatus))
+    new_status = Column(SQLEnum(AlertStatus))
+
+    # Context
+    change_reason = Column(Text)
+    notes = Column(Text)
+
+    # Metrics at time of change
+    inventory_tonnes = Column(Float)
+    days_supply = Column(Float)
+    confidence_score = Column(Float)
+
+    # Relationships
+    alert = relationship("ShortageAlert", back_populates="history")
+
+    __table_args__ = (
+        Index("idx_history_alert_date", "alert_id", "changed_at"),
+    )
+
+
+class AlertSubscription(Base):
+    """Alert notification subscriptions."""
+
+    __tablename__ = "alert_subscriptions"
+
+    # Subscriber details
+    subscriber_name = Column(String(100), nullable=False)
+    subscriber_email = Column(String(255))
+    subscriber_phone = Column(String(50))
+    subscriber_organization = Column(String(255))
+    subscriber_role = Column(String(100))
+
+    # Subscription scope
+    region_ids = Column(JSON)  # List of region IDs (null = all)
+    category_ids = Column(JSON)  # List of category IDs (null = all)
+    alert_types = Column(JSON)  # List of alert types (null = all)
+    minimum_alert_level = Column(SQLEnum(AlertLevel), default=AlertLevel.WARNING)
+
+    # Notification preferences
+    notify_email = Column(Boolean, default=True)
+    notify_sms = Column(Boolean, default=False)
+    notify_webhook = Column(Boolean, default=False)
+    webhook_url = Column(String(500))
+
+    # Timing
+    immediate_notifications = Column(Boolean, default=True)
+    digest_frequency = Column(String(20))  # daily, weekly
+    quiet_hours_start = Column(Integer)  # Hour 0-23
+    quiet_hours_end = Column(Integer)
+
+    # Status
+    is_active = Column(Boolean, default=True)
+    verified = Column(Boolean, default=False)
+    verification_token = Column(String(100))
+
+    last_notification_at = Column(DateTime)
+    notifications_sent = Column(Integer, default=0)
+
+    # Relationships
+    # TEMPORARILY DISABLED:     alerts = relationship("ShortageAlert", back_populates="subscriptions")
+
+    __table_args__ = (
+        Index("idx_subscription_active", "is_active"),
+    )
+
+
+class AlertAction(Base):
+    """Recommended and taken actions for alerts."""
+
+    __tablename__ = "alert_actions"
+
+    alert_id = Column(Integer, ForeignKey("shortage_alerts.id"), nullable=False)
+
+    # Action details
+    action_type = Column(String(50), nullable=False)  # procurement, distribution, aid_request, etc.
+    action_title = Column(String(255), nullable=False)
+    action_description = Column(Text)
+    priority = Column(Integer)  # 1 = highest
+
+    # Status
+    status = Column(String(50), default="recommended")  # recommended, approved, in_progress, completed, cancelled
+    assigned_to = Column(String(100))
+    due_date = Column(DateTime)
+    completed_at = Column(DateTime)
+
+    # Resources
+    estimated_cost_usd = Column(Float)
+    actual_cost_usd = Column(Float)
+    resources_needed = Column(JSON)
+
+    # Outcome
+    outcome = Column(Text)
+    effectiveness_score = Column(Float)  # 0-1
+
+    notes = Column(Text)
+
+    # Relationships
+    alert = relationship("ShortageAlert")
+
+    __table_args__ = (
+        Index("idx_action_alert_status", "alert_id", "status"),
+    )
